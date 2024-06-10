@@ -1,16 +1,12 @@
 using Photon.Pun;
-using UnityEditor;
-using UnityEngine.SceneManagement;
 using UnityEngine;
-using JetBrains.Annotations;
 using Photon.Realtime;
-using Photon.Pun.Demo.Cockpit;
+using UnityEngine.SceneManagement;
 
 [DefaultExecutionOrder(-1)]
 
 public class PhotonManager : MonoBehaviourPunCallbacks
 {
-    private const string ROOM_SCENE = "RoomScene";
     private const string GAME_SCENE = "GameScene";
 
     [SerializeField] private string sampleRoomName = "My Room";
@@ -27,7 +23,6 @@ public class PhotonManager : MonoBehaviourPunCallbacks
         PhotonNetwork.JoinLobby();
     }
 
-    //When the player has joined a lobby, join or create the default room
     public override void OnJoinedLobby()
     {
         JoinOrCreateRoom();
@@ -40,7 +35,6 @@ public class PhotonManager : MonoBehaviourPunCallbacks
         PhotonNetwork.JoinOrCreateRoom(sampleRoomName, new RoomOptions { MaxPlayers = 20, BroadcastPropsChangeToAll = true }, TypedLobby.Default);
     }
 
-    //Once the player has joined the room, the main game scene will be loaded
     public override void OnJoinedRoom()
     {
         PhotonNetwork.LoadLevel(GAME_SCENE);

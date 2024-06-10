@@ -3,9 +3,6 @@ using Agora.Rtc;
 using Agora_RTC_Plugin.API_Example;
 using UnityEngine.UI;
 using System.Collections.Generic;
-using System.Linq;
-using UnityEngine.UIElements;
-using Unity.VisualScripting.Antlr3.Runtime;
 
 public class AgoraManager : MonoBehaviour
 {
@@ -13,14 +10,14 @@ public class AgoraManager : MonoBehaviour
 
     [SerializeField] private string appID;
     [SerializeField] private GameObject canvas;
+    [SerializeField] private string tokenBase = "https://agora-token-server-qrv9.onrender.com";
 
-    private string tokenBase = "http://localhost:8080";
     private IRtcEngine RtcEngine;
 
     private string token = "";
     private string channelName = "Sample";
+    private PlayerInfo mainPlayerInfo;
 
-    private Player player;
     public CONNECTION_STATE_TYPE connectionState = CONNECTION_STATE_TYPE.CONNECTION_STATE_DISCONNECTED;
     public Dictionary<string, List<uint>> usersJoinedInAChannel;
 
@@ -35,6 +32,8 @@ public class AgoraManager : MonoBehaviour
         InitRtcEngine();
         SetBasicConfiguration();
     }
+
+    #region Configuration Functions
 
     private void InitRtcEngine()
     {
@@ -62,82 +61,99 @@ public class AgoraManager : MonoBehaviour
         config.bitrate = 0;
         RtcEngine.SetVideoEncoderConfiguration(config);
 
-        RtcEngine.SetChannelProfile(CHANNEL_PROFILE_TYPE.CHANNEL_PROFILE_COMMUNICATION);
+        RtcEngine.SetChannelProfile(CHANNEL_PROFILE_TYPE.CHANNEL_PROFILE_LIVE_BROADCASTING);
         RtcEngine.SetClientRole(CLIENT_ROLE_TYPE.CLIENT_ROLE_BROADCASTER);
     }
 
-    public void JoinChannel()
-    {
-        //string player1ChannelName = player.GetChannelName();
-        //string player2ChannelName = player2.GetChannelName();
+    #endregion
 
-        ////If both the players have not joined a channel
-        //if (player1ChannelName == "" && player2ChannelName == "")
-        //{
-        //    player.SetChannelName(GenerateChannelName());
-        //}
-        ////If both the players are already in a channel
-        //else if (player1ChannelName != "" && player2ChannelName != "")
-        //{
-        //    return;
-        //}
-        ////If one of the players has joined a channel
-        //else if(player2ChannelName != "")
-        //{
-        //    player.SetToken(player2.GetToken());
-        //    player.SetChannelName(player2ChannelName);
-        //}
+    #region Channel Join/Leave Handler Functions
+
+    /// <summary>
+    /// The function that is to be called whenever a collision happens. Determines the channel to be joined for the main player based on some conditions.
+    /// </summary>
+    /// <param name="player1Info"></param>
+    /// <param name="player2Info"></param>
+    public void JoinChannel(PlayerInfo player1Info, PlayerInfo player2Info)
+    {
+        string player1ChannelName = player1Info.GetChannelName();
+        string player2ChannelName = player2Info.GetChannelName();
+
+        mainPlayerInfo = player1Info;
+
+        //If both the players have not joined a channel
+        if (player1ChannelName == "" && player2ChannelName == "")
+        {
+            string newChannelName = GenerateChannelName();
+            channelName = newChannelName;
+
+            mainPlayerInfo.SetChannelName(channelName);
+        }
+        //If both the players are already in a channel
+        else if (player1ChannelName != "" && player2ChannelName != "")
+        {
+            return;
+        }
+        //If the other player has joined a channel, join their channel
+        else if (player2ChannelName != "")
+        {
+            UpdatePropertiesForPlayer(mainPlayerInfo, player2ChannelName, player2Info.GetToken());
+        }
+
+        JoinChannel();
+    }
+
+    /// <summary>
+    /// Responsible for joining the user to a channel and making a video view of the user 
+    /// </summary>
+    private void JoinChannel()
+    {
+        //If a token is not yet generated, we first generate one and then join the channel
 
         if (token.Length == 0)
         {
-            StartCoroutine(HelperClass.FetchToken(tokenBase, channelName, 0, JoinOrRenewToken));
+            StartCoroutine(HelperClass.FetchToken(tokenBase, channelName, 0, UpdateToken));
             return;
         }
 
         RtcEngine.JoinChannel(token, channelName, "", 0);
+        UpdateUsersInAChannelTable(channelName, 0);
         RtcEngine.StartPreview();
         MakeVideoView(0);
     }
 
+    /// <summary>
+    /// Responsible for leaving a channel for the user and destroying video views
+    /// </summary>
     public void LeaveChannel()
     {
+        UpdatePropertiesForPlayer(mainPlayerInfo, "", "");
+
         RtcEngine.StopPreview();
         DestroyVideoView(0);
         RtcEngine.LeaveChannel();
     }
 
-    private string GenerateChannelName()
+    /// <summary>
+    /// Responsible for removing the sole user left in a channel
+    /// </summary>
+    public void LeaveChannelIfNoOtherUsersPresent()
     {
-        return GetRandomChannelName(10);
+        string channel = mainPlayerInfo.GetChannelName();
+        if (usersJoinedInAChannel[channel].Count != 1) return;
+
+        RemoveAllTheUsersFromChannel(channel);
+        LeaveChannel();
     }
 
-    private void JoinOrRenewToken(string newToken)
-    {
-        token = newToken;
-        if(connectionState == CONNECTION_STATE_TYPE.CONNECTION_STATE_DISCONNECTED || connectionState == CONNECTION_STATE_TYPE.CONNECTION_STATE_FAILED)
-        {
-            JoinChannel();
-        }
-        else
-        {
+    #endregion
 
-        }
-    }
+    #region Helper Functions
 
-    private string GetRandomChannelName(int length)
-    {
-        string characters = "abcdefghijklmnopqrstuvwxyzABCDDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-
-        string randomChannelName = "";
-
-        for(int i = 0; i < length; i++)
-        {
-            randomChannelName += characters[Random.Range(0, characters.Length)];
-        }
-
-        return randomChannelName;
-    }
-
+    /// <summary>
+    /// Responsible for destroying the video view of a user
+    /// </summary>
+    /// <param name="uid">User Id of the user whose video view is to be destroyed</param>
     private void DestroyVideoView(uint uid)
     {
         GameObject videoView = GameObject.Find(uid.ToString());
@@ -146,6 +162,108 @@ public class AgoraManager : MonoBehaviour
             Destroy(videoView);
         }
     }
+
+    /// <summary>
+    /// Responsible for updating the users in a channel dictionary
+    /// </summary>
+    /// <param name="channel">
+    /// Name of the channel that the user is joining
+    /// </param>
+    /// <param name="uid">
+    /// User Id of the user
+    /// </param>
+    private void UpdateUsersInAChannelTable(string channel, uint uid)
+    {
+        if (usersJoinedInAChannel.ContainsKey(channel))
+        {
+            usersJoinedInAChannel[channel].Add(uid);
+        }
+        else
+        {
+            usersJoinedInAChannel.Add(channel, new List<uint> { uid });
+        }
+    }
+
+    /// <summary>
+    /// Generate a channel name at the runtime
+    /// </summary>
+    /// <returns></returns>
+    private string GenerateChannelName()
+    {
+        return GetRandomChannelName(10);
+    }
+
+    /// <summary>
+    /// Generate a random channel name of a specified length
+    /// </summary>
+    /// <param name="length">
+    /// Required length for the channel name
+    /// </param>
+    /// <returns>
+    /// Returns a randomly generated channel name
+    /// </returns>
+    private string GetRandomChannelName(int length)
+    {
+        string characters = "abcdefghijklmnopqrstuvwxyzABCDDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+        string randomChannelName = "";
+
+        for (int i = 0; i < length; i++)
+        {
+            randomChannelName += characters[Random.Range(0, characters.Length)];
+        }
+
+        return randomChannelName;
+    }
+
+    /// <summary>
+    /// Callback function for updating the token, whenever it is generated from the server
+    /// </summary>
+    /// <param name="newToken"></param>
+    private void UpdateToken(string newToken)
+    {
+        token = newToken;
+
+        mainPlayerInfo.SetToken(token);
+
+        if(connectionState == CONNECTION_STATE_TYPE.CONNECTION_STATE_DISCONNECTED || connectionState == CONNECTION_STATE_TYPE.CONNECTION_STATE_FAILED)
+        {
+            JoinChannel();
+        }
+    }
+
+    /// <summary>
+    /// Responsible for removing all the users from a channel
+    /// </summary>
+    /// <param name="userChannel">
+    /// Name of the channel
+    /// </param>
+    private void RemoveAllTheUsersFromChannel(string userChannel)
+    {
+        uint uid = usersJoinedInAChannel[userChannel][0];
+        usersJoinedInAChannel.Remove(userChannel);
+        DestroyVideoView(uid);
+    }
+
+    /// <summary>
+    /// Responsible for updating channel name and token of a player with the given values
+    /// </summary>
+    /// <param name="player">The player whose valeus are to be updated</param>
+    /// <param name="channelName">The name of the new channel</param>
+    /// <param name="token">The new token</param>
+    private void UpdatePropertiesForPlayer(PlayerInfo player, string channelName, string token)
+    {
+        player.SetChannelName(channelName);
+        player.SetToken(token);
+
+        if(player == mainPlayerInfo)
+        {
+            this.channelName = channelName;
+            this.token = token;
+        }
+    }
+
+    #endregion
 
     #region Video View Rendering Logic
     private void MakeVideoView(uint uid, string channelId = "")
@@ -229,12 +347,6 @@ public class AgoraManager : MonoBehaviour
 
     #endregion
 
-
-    public IRtcEngine GetIrtcEngine()
-    {
-        return RtcEngine;
-    }
-
     #region User Events
     internal class UserEventHandler : IRtcEngineEventHandler
     {
@@ -244,54 +356,50 @@ public class AgoraManager : MonoBehaviour
             this.agoraManager = agoraManager;
         }
 
-        public override void OnError(int err, string msg)
-        {
-        }
-
-        public override void OnJoinChannelSuccess(RtcConnection connection, int elapsed)
-        {
-            Debug.LogError("Joined channel");
-        }
-
-        public override void OnRejoinChannelSuccess(RtcConnection connection, int elapsed)
-        {
-            
-        }
-
+        /// <summary>
+        /// Responsible for deleting all the views that are present on a user's screen, when the user leaves a channel
+        /// </summary>
+        /// <param name="connection"></param>
+        /// <param name="stats"></param>
         public override void OnLeaveChannel(RtcConnection connection, RtcStats stats)
         {
-            //When a player leaves a channel, all the other views present in that channel will be destroyed
-            foreach(uint uid in agoraManager.usersJoinedInAChannel[connection.channelId])
+            if (!agoraManager.usersJoinedInAChannel.ContainsKey(connection.channelId)) return;
+            
+            foreach (uint uid in agoraManager.usersJoinedInAChannel[connection.channelId])
             {
                 agoraManager.DestroyVideoView(uid);
             }
         }
 
-        public override void OnClientRoleChanged(RtcConnection connection, CLIENT_ROLE_TYPE oldRole, CLIENT_ROLE_TYPE newRole, ClientRoleOptions newRoleOptions)
-        {
-
-        }
-
+        /// <summary>
+        /// Responsible for adding the newly joined user to the channel's uid pool
+        /// </summary>
+        /// <param name="connection"></param>
+        /// <param name="uid"></param>
+        /// <param name="elapsed"></param>
         public override void OnUserJoined(RtcConnection connection, uint uid, int elapsed)
         {
             agoraManager.MakeVideoView(uid, connection.channelId);
 
-            //When a remote user joins a channel, we will add the user in the users pool for that channel
-            if(agoraManager.usersJoinedInAChannel.ContainsKey(connection.channelId))
-            {
-                agoraManager.usersJoinedInAChannel[connection.channelId].Add(uid);
-            }
-            else
-            {
-                agoraManager.usersJoinedInAChannel.Add(connection.channelId, new List<uint> { uid });
-            }
-            
+            agoraManager.UpdateUsersInAChannelTable(connection.channelId, uid);
         }
 
+        /// <summary>
+        /// Responsible for removing a remote user's video view, if the user leaves the channel
+        /// </summary>
+        /// <param name="connection"></param>
+        /// <param name="uid"></param>
+        /// <param name="reason"></param>
         public override void OnUserOffline(RtcConnection connection, uint uid, USER_OFFLINE_REASON_TYPE reason)
         {
-            //If a remote user goes offline(leaves the channel), we will remove the user's video view
             agoraManager.DestroyVideoView(uid);
+
+            string userChannel = connection.channelId;
+
+            if (agoraManager.usersJoinedInAChannel.ContainsKey(userChannel))
+            {
+                agoraManager.usersJoinedInAChannel[userChannel].Remove(uid);
+            }
         }
 
         public override void OnConnectionStateChanged(RtcConnection connection, CONNECTION_STATE_TYPE state, CONNECTION_CHANGED_REASON_TYPE reason)
@@ -301,4 +409,3 @@ public class AgoraManager : MonoBehaviour
     }
     #endregion
 }
-

@@ -1,38 +1,43 @@
 using Photon.Pun;
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Animations;
 
 public class PlayerCollisionsHandler : MonoBehaviour
 {
     private const string PLAYER = "Player";
 
-    private Player player;
+    [SerializeField] private float waitTimeBeforeJoiningChannel = 1f;
+
+    private PlayerInfo player;
+    private PlayerController playerController;
     private PhotonView photonView;
 
     private void Awake()
     {
-        player = GetComponent<Player>();
-
+        player = GetComponent<PlayerInfo>();
+        playerController = GetComponent<PlayerController>();
         photonView = GetComponent<PhotonView>();
     }
 
     private void OnTriggerEnter2D(Collider2D collision)
     {
         if (!photonView.IsMine) return;
+
         if(collision.gameObject.CompareTag(PLAYER))
         {
-            AgoraManager.Instance.JoinChannel();
+            AgoraManager.Instance.JoinChannel(player, collision.GetComponent<PlayerInfo>());
         }
     }
-
+     
     private void OnTriggerExit2D(Collider2D collision)
     {
         if (!photonView.IsMine) return;
-        if (collision.gameObject.CompareTag(PLAYER))
+        if (collision.gameObject.CompareTag(PLAYER) && playerController.HasPlayerMoved())
         {
             AgoraManager.Instance.LeaveChannel();
+        }
+        else
+        {
+            AgoraManager.Instance.LeaveChannelIfNoOtherUsersPresent();
         }
     }
 }
